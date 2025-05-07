@@ -1,24 +1,42 @@
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-import os
 from django.conf import settings
+from PIL import Image
+import os
+from io import BytesIO
 
 @csrf_exempt
 def upload_image(request):
     if request.method == 'POST' and 'image' in request.FILES:
-        image = request.FILES['image']
-        file_name = image.name
-        file_path = os.path.join(settings.MEDIA_ROOT, 'uploads', file_name)
+        image_file = request.FILES['image']
+        file_name = image_file.name
+        file_ext = os.path.splitext(file_name)[1].lower()
 
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        image = Image.open(image_file)
 
-        with open(file_path, 'wb+') as destination:
-            for chunk in image.chunks():
-                destination.write(chunk)
+        if image.mode in ("RGBA", "P") and file_ext in ['.jpg', '.jpeg']:
+            image = image.convert("RGB")
+
+        # Resize large images
+        max_size = (1920, 1080)
+        image.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+        # Create upload path
+        upload_dir = os.path.join(settings.MEDIA_ROOT, 'uploads')
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, file_name)
+
+        # Compress and save
+        if file_ext in ['.jpg', '.jpeg']:
+            image.save(file_path, format='JPEG', quality=70, optimize=True)
+        elif file_ext == '.png':
+            image.save(file_path, format='PNG', optimize=True, compress_level=9)
+        else:
+            # For unsupported formats, save as-is
+            image.save(file_path)
 
         file_url = f"{settings.MEDIA_URL}uploads/{file_name}"
         return JsonResponse({'status': 'success', 'url': file_url})
 
     return JsonResponse({'status': 'error', 'message': 'No image found'}, status=400)
-
